@@ -11,3 +11,276 @@ output: html_notebook
 library(nycflights13)
 library(tidyverse)
 ```
+
+## Filter rows with `filter()`
+
+### Exercises
+
+1.  Find all flights that:
+
+    -   Had an arrival delay of two or more hours:
+
+    ```{r ex1a}
+    head(flights)
+    flights %>% filter(arr_delay >= 120)
+    ```
+
+    -   Flew to Houston (`IAH` or `HOU`)
+
+    ```{r ex1b}
+    flights %>% filter(dest == "IAH" | dest == "HOU")
+    ```
+
+    -   Were operated by United, American, or Delta
+
+    ```{r ex1c}
+    sort(unique(flights$carrier))
+    flights %>% filter(carrier == "UA" | carrier == "AA" | carrier == "DL")
+
+    # or
+    flights %>% filter(carrier %in% c("UA", "AA", "DL"))
+    ```
+
+    -   Departed in summer (July, August, and September)
+
+    ```{r ex1d}
+    flights %>% filter(month %in% c(7, 8, 9))
+
+    # or
+    flights %>% 
+      mutate(month_alt = month.name[month]) %>% 
+      filter(month_alt %in% c("July", "August", "September"))
+    ```
+
+    -   Arrived more than two hours late, but didn't leave late
+
+    ```{r ex1e}
+    summary(flights$dep_delay)
+    flights %>% 
+      filter(arr_delay > 120 & dep_delay <= 0)
+    ```
+
+    -   Were delayed by at least an hour, but made up over 30 minutes in flight
+
+    ```{r ex1f}
+    summary(flights$arr_delay)
+    flights %>% 
+      filter(dep_delay >= 60 & dep_delay - arr_delay > 30)
+    ```
+
+    -   Departed between midnight and 6am (inclusive)
+
+    ```{r ex1g}
+    flights %>% arrange(dep_time)
+    flights %>% filter(dep_time == 2400 | dep_time <= 600)
+    ```
+
+2.  Another useful `dplyr` filtering helper is `between()`. What does it do? Can you use it to simplify the code needed to answer the previous challenges?
+
+    ```{r ex2}
+    # 1d
+    flights %>% filter(between(month, 7, 9))
+    ```
+
+3.  How many flights have a missing `dep_time`? What other variables are missing? What might these rows represent?
+
+    ```{r ex3}
+    sum(is.na(flights$dep_time))
+
+    # or look at the missing rows specifically
+    flights %>% filter(is.na(dep_time))
+
+    DataExplorer::plot_missing(flights)
+    DataExplorer::profile_missing(flights)
+    ```
+
+    These missing values might represent flights that were canceled.
+
+4.  Why is `NA ^ 0` not missing? What is `NA | TRUE` not missing? Why is `FALSE & NA` not missing? Can you figure out the general rule? (`NA * 0` is a tricky counterexample!)
+
+    ```{r ex4}
+    NA ^ 0
+    1 ^ 0
+    34 ^ 0
+
+    NA | TRUE
+    5 | TRUE
+
+    FALSE & NA
+    ```
+
+    Anything raised to the `0`th power is 1. `NA | TRUE` is not missing because anything *or* `TRUE` is `TRUE`. `FALSE & NA` is `FALSE` because anything *and* `FALSE` is always `FALSE`.
+
+## Arrange rows with `arrange()`
+
+### Exercises
+
+1.  How could you use `arrange()` to sort all missing values to the start? (Hint: use `is.na()`)
+
+    ```{r}
+    flights %>% arrange(desc(is.na(dep_time)))
+    ```
+
+2.  Sort `flights` to find the most delayed flights. Find the flights that left earliest.
+
+    ```{r}
+    # latest
+    flights %>% arrange(desc(dep_delay))
+
+    # earliest
+    flights %>% arrange(dep_delay)
+    ```
+
+3.  Sort `flights` to find the fastest (highest speed) flights.
+
+    ```{r}
+    flights %>% arrange(desc(distance / air_time))
+    ```
+
+4.  Which flights traveled the farthest? Which traveled the shortest?
+
+    ```{r}
+    # farthest
+    flights %>% arrange(desc(distance))
+
+    # shortest
+    flights %>% arrange(distance)
+    ```
+
+## Select columns with `select()`
+
+### Exercises
+
+1.  Brainstorm as many ways as possible to select `dep_time`, `dep_delay`, `arr_time`, and `arr_delay` from `flights`.
+
+    ```{r}
+    flights %>% select(dep_time, dep_delay, arr_time, arr_delay)
+
+    flights %>% select(4, 6, 7, 9)
+
+    flights %>% select(4, 6:7, 9)
+
+    flights %>% select(all_of(c("dep_time", "dep_delay", "arr_time", "arr_delay")))
+
+    flights %>% select(any_of(c("dep_time", "dep_delay", "arr_time", "arr_delay")))
+
+    flights %>% select(starts_with("dep"), starts_with("arr"))
+
+    flights %>% select(matches("^(dep|arr)_(time|delay)"))
+    ```
+
+2.  What happens if you include the name of a variable multiple times in a `select()` call?
+
+    ```{r}
+    flights %>% select(dep_time, dep_time)
+    ```
+
+    The `select()` operator ignores duplicate selections.
+
+3.  What does the `any_of()` function do?
+
+    The `any_of()` function is a selection function that helps to select any variables that match a vector of column names.
+
+    ```{r}
+    vars <- c("dep_time", "dep_delay", "dep_test")
+    flights %>% select(any_of(vars))
+    ```
+
+    Why might it be helpful in conjunction with this vector?
+
+    ```{r}
+    vars <- c("year", "month", "day", "dep_delay", "arr_delay")
+    ```
+
+    It would be helpful because it would make it easy to select these variables from the `flights` data:
+
+    ```{r}
+    flights %>% select(any_of(vars))
+    ```
+
+4.  Does the result of running the following code surprise you? How do the select helpers deal with case by default? How can you change that default?
+
+    ```{r}
+    select(flights, contains("TIME"))
+    ```
+
+    `select()` ignores case by default. This can be changes as follows:
+
+    ```{r}
+    select(flights, contains("TIME", ignore.case = FALSE))
+    ```
+
+## Add new variables with `mutate()`
+
+### Exercises
+
+1.  Currently `dep_time` and `sched_dep_time` are convenient to look at, but hard to compute with because they're not really continuous numbers. Convert them to a more convenient representation of number of minutes since midnight.
+
+    ```{r}
+    head(flights)
+    flights %>% 
+      mutate(dep_time = as.character(dep_time),
+             dep_time = str_pad(dep_time, width = 4, side = "left", pad = 0),
+             dep_time = str_c(str_extract(dep_time, pattern = "^.."), ":", str_extract(dep_time, pattern = "..$")),
+             dep_time = lubridate::hm(dep_time),
+             sched_dep_time = as.character(sched_dep_time),
+             sched_dep_time = str_pad(sched_dep_time, width = 4, side = "left", pad = 0),
+             sched_dep_time = str_c(str_extract(sched_dep_time, pattern = "^.."), ":", str_extract(sched_dep_time, pattern = "..$")),
+             sched_dep_time = lubridate::hm(sched_dep_time))
+    ```
+
+2.  Compare `air_time` with `arr_time - dep_time`. What do you expect to see? What do you see? What do you need to do to fix it?
+
+    ```{r}
+    flights %>% 
+      mutate(time_diff = arr_time - dep_time,
+             air_time_diff = air_time - time_diff) %>% 
+      filter(air_time_diff != 0) %>% 
+      select(air_time, time_diff)
+    ```
+
+    I expected these values to be the same. There could be errors in the data, or these differences may be the result of time zone differences.
+
+3.  Compare `dep_time`, `sched_dep_time`, and `dep_delay`. How would you expect those three numbers to be related?
+
+    ```{r}
+    flights %>% select(dep_time, sched_dep_time, dep_delay)
+    ```
+
+    `dep_time` should be very close to the `sched_dep_time` and any differences should be reflected in the `dep_delay`.
+
+4.  Find the 10 most delayed flights using a ranking function. How do you want to handle ties? Carefully read the documentation for `min_rank()`.
+
+    ```{r}
+    flights %>% 
+      mutate(dep_delay_rank = min_rank(dep_delay)) %>% 
+      select(dep_delay, dep_delay_rank) %>% 
+      filter(dep_delay_rank <= 10) %>% 
+      arrange(dep_delay_rank)
+
+    # row_number eliminates ties
+    flights %>% 
+      mutate(dep_delay_rank = row_number(dep_delay)) %>% 
+      select(dep_delay, dep_delay_rank) %>% 
+      filter(dep_delay_rank <= 10) %>% 
+      arrange(dep_delay_rank)
+
+    # or
+    flights %>% top_n(10, dep_delay)
+    ```
+
+5.  What does `1:3 + 1:10` return? Why?
+
+    ```{r}
+    1:3 + 1:10
+    ```
+
+    R adds each element of both vectors to get a total that is the same length as the longest vector.
+
+6.  What trigonometric functions does R provide?
+
+    ```{r}
+    ?Trig
+    ```
+
+## Grouped summaries with `summarise()`
