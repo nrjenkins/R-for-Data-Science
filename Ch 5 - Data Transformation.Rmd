@@ -284,3 +284,335 @@ library(tidyverse)
     ```
 
 ## Grouped summaries with `summarise()`
+
+### Exercises
+
+1.  Brainstorm at least 5 different ways to assess the typical delay characteristics of a group of flights. Consider the following scenarios:
+
+    -   A flight is 15 minutes early 50% of the time, and 15 minutes late 50% of the time.
+
+    -   A flight is always 10 minutes late.
+
+    -   A flight is 30 minutes early 50% of the time, and 30 minutes late 50% of the time.
+
+    -   99% of the time a flight is on time. 1% of the time it's 2 hours late.
+
+    Which is more important: arrival delay or departure delay?
+
+    ```{r}
+
+    ```
+
+2.  Come up with another approach that will give you the same output as `not_cancelled %>% count(dest)` and `not_cancelled %>% count(tailnum, wt = distance)` without using `count()`.
+
+    ```{r}
+    not_cancelled <- 
+      flights %>% 
+      filter(!is.na(dep_delay), !is.na(arr_delay))
+
+    not_cancelled %>% count(dest)
+
+    # alt
+    not_cancelled %>% 
+      group_by(dest) %>% 
+      summarise(n = n())
+
+    not_cancelled %>% count(tailnum, wt = distance)
+
+    # alt
+    not_cancelled %>% 
+      group_by(tailnum) %>% 
+      summarise(n = sum(distance))
+    ```
+
+3.  Our definition of cancelled flights (`is.na(dep_delay) | is.na(arr_delay)`) is slightly suboptimal. Why? Which is the most important column?
+
+    A flight cancellation may not be the only reason why there is missing data for `dep_delay` or `arr_delay`. Flights could be diverted to another airport, or could have crashed. `arr_delay` is the most important because a missing value in this column could mean many different options.
+
+4.  Look at the number of cancelled flights per day. Is there a pattern? Is the proportion of cancelled flights related to the average delay?
+
+    ```{r}
+    flights %>% 
+      mutate(canceled_flight = ifelse(is.na(dep_delay) | is.na(arr_delay), 1, 0),
+             canceled_flight = as.factor(canceled_flight)) %>%
+      ggplot(aes(x = dep_delay, y = canceled_flight)) +
+      geom_point(position = "jitter") +
+      scale_y_discrete(labels = c("Not Canceled", "Canceled")) +
+      theme_minimal()
+
+    # canceled flights vs total flights
+    flights %>% 
+      mutate(canceled_flight = ifelse(is.na(dep_delay) | is.na(arr_delay), 1, 0)) %>%
+      group_by(month, day, year) %>% 
+      summarise(canceled_flight = sum(canceled_flight),
+                tot_flights = n()) %>% 
+      ggplot(aes(x = tot_flights, y = canceled_flight)) +
+      geom_point() +
+      theme_minimal()
+
+    # canceled flights vs average delays
+    flights %>% 
+      group_by(month, day, year) %>% 
+      summarise(canceled_flight_prop = mean(is.na(dep_delay) | is.na(arr_delay)),
+                avg_dep_delay = mean(dep_delay, na.rm = TRUE),
+                avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+                tot_flights = n()) %>%
+      ggplot(aes(x = tot_flights, y = canceled_flight_prop, color = avg_dep_delay)) +
+      geom_point() +
+      theme_minimal()
+
+    flights %>% 
+      group_by(month, day, year) %>% 
+      summarise(canceled_flight_prop = mean(is.na(dep_delay) | is.na(arr_delay)),
+                avg_dep_delay = mean(dep_delay, na.rm = TRUE),
+                avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+                tot_flights = n()) %>%
+      ggplot(aes(x = avg_dep_delay, y = canceled_flight_prop)) +
+      geom_point() +
+      theme_minimal()
+    ```
+
+5.  Which carrier has the worst delays? Challenge: can you disentangle the effects of bad airports vs. bad carriers? Why/why not? (Hint: think about `flights %>% group_by(carrier, dest) %>% summarise(n())`.
+
+    ```{r}
+    # average delays by carrier
+    flights %>% 
+      group_by(carrier) %>% 
+      summarise(avg_dep_delay = mean(dep_delay, na.rm = TRUE)) %>% 
+      ggplot(aes(x = reorder(carrier, avg_dep_delay), y = avg_dep_delay)) +
+      geom_col() +
+      theme_minimal()
+
+    # best to compare the delays of each carrier within each route to see how
+    # route vs. carrier affects delays
+    flights %>% 
+      # fill in carrier names
+      left_join(., airlines, by = c("carrier")) %>% 
+      # remove missing depatrure delays
+      filter(!is.na(dep_delay)) %>% 
+      # total delay time by carrier within a route
+      group_by(carrier, origin, dest) %>% 
+      summarise(dep_delay = sum(dep_delay),
+                flights = n(),
+                name = first(name)) %>% 
+      # delay time for each route
+      group_by(origin, dest) %>% 
+      mutate(route_dep_delay = sum(dep_delay),
+             tot_route_flights = sum(flights)) %>% 
+      # compare carrier delays to route delays
+      ungroup() %>% 
+      mutate(
+        # calculate how much a carrier delay deviates from a route delay
+        dep_delays = route_dep_delay - dep_delay,
+        # calculate number of carrier flights deviation from total route flights
+        flight_weight = tot_route_flights - flights,
+        # weight delays by number of flights to control for amount
+        dep_delays_wt = dep_delays / flight_weight,
+        # find the weighted average carrier delay
+        avg_dep_delay_wt = dep_delay / flights,
+        # difference between carrier delays and other carriers on route
+        dep_delay_diff = avg_dep_delay_wt - dep_delays_wt
+      ) %>% 
+      # average over carriers
+      group_by(carrier) %>% 
+      summarise(dep_delay_diff = mean(dep_delay_diff, na.rm = TRUE),
+                name = first(name)) %>% 
+      # remove NaN values (division by 0)
+      filter(!is.nan(dep_delay_diff)) %>% 
+      # plot
+      ggplot(aes(x = reorder(name, dep_delay_diff), y = dep_delay_diff)) +
+      geom_col() +
+      labs(x = "Carrier", y = "Departure Delay Deviation (Lower is Better)") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    ```
+
+    Same analysis using a multilevel modeling approach. First, fit the model with varying effects for airline carrier.
+
+    ```{r}
+    flights <- 
+      flights %>% 
+      mutate(origin_dest = str_c(origin, dest, sep = "-"),
+             carrier = carrier) %>% 
+      drop_na(origin_dest, dep_delay)
+
+    fit <- lme4::lmer(dep_delay ~ origin_dest + (1 | carrier),
+                 data = flights)
+    broom.mixed::tidy(fit, conf.int = TRUE)
+    ```
+
+    These estimates show the average delay time for each route. This provides a good picture of which routes have the most trouble. There are a lot of routes to visualize, but we can plot a random sample to get an idea of how the delay times vary.
+
+    ```{r}
+    set.seed(1)
+    broom.mixed::tidy(fit, conf.int = TRUE) %>% 
+      sample_n(size = 10) %>% 
+      ggplot(aes(x = reorder(term, estimate), y = estimate, ymin = conf.low,
+                 ymax = conf.high)) +
+      geom_pointrange() +
+      coord_flip() +
+      labs(y = "Estimated Delay",
+           x = "Route",
+           title = "Average Delay Times by Flight Route") +
+      theme_minimal()
+    ```
+
+    This plot shows that flying from EWR to CAE has more delays, on average, than flying from LGA to BTV.
+
+    To see how the average delays for each airline, we look at the random effects.
+
+    ```{r}
+    set.seed(1)
+    broom.mixed::tidy(fit, conf.int = TRUE, effects = "ran_vals") %>% 
+      left_join(., airlines, by = c("level" = "carrier")) %>% 
+      ggplot(aes(x = reorder(name, estimate), y = estimate, ymin = conf.low,
+                 ymax = conf.high)) +
+      geom_pointrange() +
+      coord_flip() +
+      labs(y = "Standard Deviation in Route Delay",
+           x = "Airline",
+           title = "Standard Deviation in Delay Times by Airline") +
+      theme_minimal()
+    ```
+
+    Finally, we can visualize the delay times by airline and route.
+
+    ```{r}
+    library(ggeffects)
+    preds <- ggpredict(fit, 
+                       type = "random", 
+                       terms = c("origin_dest", "carrier"))
+    preds
+
+    preds %>% 
+      left_join(., airlines, by = c("group" = "carrier")) %>% 
+      # randomly sample 10 routes from each group
+      group_by(group) %>% 
+      tjmisc::sample_n_of(10, x) %>% 
+      # plot
+      ggplot(aes(x = x, y = predicted, ymin = conf.low, ymax = conf.high,
+                 color = name)) +
+      geom_pointrange(position = position_dodge(width = 0.5)) +
+      #facet_wrap(~ x) +
+      labs(x = "Route", 
+           y = "Predicted Delay",
+           color = "Carrier") +
+      theme_minimal()
+
+    preds %>% 
+      left_join(., airlines, by = c("group" = "carrier")) %>%
+      # randomly sample 10 routes from each group
+      group_by(group) %>% 
+      tjmisc::sample_n_of(10, x) %>% 
+      # plot
+      ggplot(aes(x = name, y = predicted, ymin = conf.low, ymax = conf.high,
+                 color = name)) +
+      geom_pointrange(position = position_dodge(width = 0.5)) +
+      facet_wrap(~ x) +
+      labs(x = "Route", 
+           y = "Predicted Delay",
+           color = "Carrier") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    ```
+
+6.  What does the `sort` argument to `count()` do? When might you use it?
+
+    ```{r}
+    flights %>% count(carrier, sort = TRUE)
+    ```
+
+    Sort, is a logical argument that will show the largest values first.
+
+## Grouped mutates (and filters)
+
+### Exercises
+
+1.  Refer back to the lists of useful mutate and filtering functions. Describe how each operation changes when you combine it with grouping.
+
+    When combined with grouping, these functions preform the operations for each group.
+
+2.  Which plane (`tailnum`) has the worst, on-time record?
+
+    ```{r}
+    flights %>% 
+      group_by(tailnum) %>% 
+      summarise(avg_arr_delay = mean(arr_delay, na.rm = TRUE),
+                n_flights = n(),
+                avg_arr_delay_wt = avg_arr_delay / n_flights) %>% 
+      arrange(desc(avg_arr_delay_wt))
+    ```
+
+3.  What time of day should you fly if you want to avoid delays as much as possible?
+
+    ```{r}
+    flights %>% 
+      group_by(hour) %>% 
+      summarise(avg_delay = mean(arr_delay, na.rm = TRUE)) %>% 
+      arrange(avg_delay)
+    ```
+
+4.  For each destination, compute the total minutes of delay. For each flight, compute the proportion of the total delay for its destination.
+
+    ```{r}
+    flights %>% 
+      filter(arr_delay > 0)%>% 
+      group_by(dest) %>% 
+      mutate(tot_delay = sum(dep_delay, arr_delay),
+             prop_delay = ((dep_delay + arr_delay) / tot_delay) * 100,
+             prop_delay = round(prop_delay, digits = 3))
+    ```
+
+5.  Delays are typically temporally correlated: even once the problem that caused the initial delay has been resolved, later flights are delayed to allow earlier flights to leave. Using `lag()`, explore how the delay of a flight is related to the delay of the immediately preceding flight.
+
+    ```{r}
+    flights %>% 
+      group_by(origin, year, month, day, dep_time) %>% 
+      mutate(previous_delay = lag(dep_delay)) %>% 
+      group_by(previous_delay) %>% 
+      summarise(avg_dep_delay = mean(dep_delay)) %>% 
+      ggplot(aes(x = previous_delay, y = avg_dep_delay)) +
+      geom_point()
+    ```
+
+6.  Look at each destination. Can you find flights that are suspiciously fast? (i.e. flights that represent a potential data entry error). Compute the air time of a flight relative to the shortest flight to that destination. Which flights were most delayed in the air?
+
+    ```{r}
+    flights %>% 
+      group_by(dest, origin) %>% 
+      mutate(air_time_std = sjmisc::std(air_time),
+             avg_air_time = mean(air_time)) %>% 
+      ggplot(aes(x = air_time_std)) +
+      geom_density()
+
+    flights %>% 
+      group_by(dest, origin) %>% 
+      mutate(air_time_std = sjmisc::std(air_time),
+             avg_air_time = mean(air_time, na.rm = TRUE)) %>% 
+      arrange(air_time_std) %>% 
+      select(carrier, flight, origin, dest, month, day, air_time, avg_air_time) %>% 
+      head(10)
+    ```
+
+7.  Find all destinations that are flown by at least two carriers. Use that information to rank the carriers.
+
+    ```{r}
+    flights %>% 
+      group_by(dest) %>%
+      mutate(tot_carriers = n_distinct(carrier)) %>% 
+      filter(tot_carriers >= 2) %>% 
+      group_by(carrier) %>% 
+      summarise(tot_destimations = n_distinct(dest)) %>% 
+      arrange(desc(tot_destimations))
+    ```
+
+8.  For each plane, count the number of flights before the first delay of greater than 1 hour.
+
+    ```{r}
+    flights %>% 
+      arrange(tailnum, year, month, day) %>% 
+      group_by(tailnum) %>% 
+      mutate(n_delays = cumsum(dep_delay > 60)) %>% 
+      summarise(tot_flights = sum(n_delays < 1)) %>% 
+      arrange(desc(tot_flights))
+    ```
