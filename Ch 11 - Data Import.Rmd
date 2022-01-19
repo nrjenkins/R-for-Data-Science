@@ -1,0 +1,155 @@
+---
+title: "Chapter 11: Data Import"
+output: html_notebook
+---
+
+## Getting Started
+
+### Exercises
+
+1.  What function would you use to read a file where fields were separated with\
+    "\|"?
+
+    I would use `read_delim(file, delim = "|").`
+
+2.  Apart from `file`, `skip`, and `comment`, what other arguments do `read_csv()`and `read_tsv()` have in common?
+
+    `col_names`, `col_types`, `col_select`, `id`, `locale`, `na`, etc.
+
+    ```{r}
+    intersect(names(formals(read_csv)), names(formals(read_tsv)))
+    ```
+
+3.  What are the most important arguments to `read_fwf()`?
+
+    `col_positions` is the most important because it controls the width of each column of data.
+
+4.  Sometimes strings in a CSV file contain commas. To prevent them from causing problems they need to be surrounded by a quoting character, like `"` or `'`. By default, `read_csv()` assumes that the quoting character will be `"`. What argument to `read_csv()` do you need to specify to read the following text into a data frame? `"x,y\n1,'a,b'"`
+
+    ```{r}
+    read_csv("x,y\n1,'a,b'", quote = "'")
+    ```
+
+5.  Identify what is wrong with each of the following inline CSV files. What happens when you run the code?
+
+    ```{r}
+    # this one doesn't capture the right number of columns
+    read_csv("a,b\n1,2,3\n4,5,6")
+
+    # Missing an additional column
+    read_csv("a,b,c\n1,2\n1,2,3,4")
+
+    # This one has an , and \ seperator
+    read_csv("a,b\n\"1")
+
+    # a and b are both column names and values
+    read_csv("a,b\n1,2\na,b")
+
+    # this is not using a comma seperator
+    read_csv("a;b\n1;3")
+    ```
+
+## Parsing a vector
+
+The `parse_*()` functions take a character vector and return a more specialized vector like a logical, integer, or date:
+
+```{r}
+str(parse_logical(c("TRUE", "FALSE", "NA")))
+str(parse_integer(c("1", "2", "3")))
+str(parse_date(c("2010-01-01", "1979-10-14")))
+```
+
+### Exercises
+
+1.  What are the most important arguments to `locale()`?
+
+    The most important argument is `decimal_mark` because it specifies appropriate decimal mark and `grouping_mark` because it specifies the numeric separator.
+
+2.  What happens if you try and set `decimal_mark` and `grouping_mark` to the same character? What happens to the default value of `grouping_mark` when you set `decimal_mark` to ","? What happens to the default value of `decimal_mark` when you set the `grouping_mark` to "."?
+
+    ```{r}
+    # set decimal_mark and grouping_mark equal
+    parse_number("1.23", locale = locale(decimal_mark = ".", grouping_mark = "."))
+
+    # default grouping_mark becomes "."
+    parse_number("1.23", locale = locale(decimal_mark = ","))
+
+    # default decimal mark becomes ","
+    parse_number("1.23", locale = locale(grouping_mark = "."))
+    ```
+
+3.  I didn't discuss the `date_format` and `time_format` options to `locale()`. What do they do? Construct an example that shows when they might be useful.
+
+    These options control how AM and PM times are handled and days and months specific to different languages.
+
+4.  If you live outside the US, create a new locale object that encapsulates the settings for the types of file you read most commonly.
+
+    ```{r}
+
+    ```
+
+5.  What's the difference between `read_csv()` and `read_csv2()`?
+
+    `read_csv2()` uses `;` for the field separator and `,` for the decimal point.
+
+6.  What are the most common encodings used in Europe? What are the most common encodings used in Asia? Do some googling to find out
+
+7.  Generate the correct format string to parse each of the following dates and times:
+
+    ```{r}
+    d1 <- "January 1, 2010"
+    d2 <- "2015-Mar-07"
+    d3 <- "06-Jun-2017"
+    d4 <- c("August 19 (2015)", "July 1 (2015)")
+    d5 <- "12/30/14" # Dec 30, 2014
+    t1 <- "1705"
+    t2 <- "11:15:10.12 PM"
+    ```
+
+    Solution:
+
+    ```{r}
+    parse_date(d1, format = "%B %d, %Y")
+    parse_date(d2, "%Y-%b-%d")
+    parse_date(d3, "%m-%b-%Y")
+    parse_date(d4, "%B %d (%Y)")
+    parse_date(d5, "%m/%d/%y")
+    parse_time(t1, "%H%M")
+    parse_time(t2, "%I:%M:%OS %p")
+    ```
+
+## Parsing a File
+
+`readr` guesses each column type by looking at the first 1,000 rows of each. But these defaults don't always work and they can be modified. Here are some examples:
+
+```{r}
+challenge <- read_csv(readr_example("challenge.csv"))
+```
+
+We can explore the problems like this:
+
+```{r}
+problems(challenge)
+```
+
+In addition to manually setting each column type, you can also read the data in with all columns as character vectors like this:
+
+```{r}
+challenge2 <- read_csv(readr_example("challenge.csv"), 
+  col_types = cols(.default = col_character())
+)
+```
+
+Then you can do some manual cleaning and let `readr` try again using `type_convert()`.
+
+## Other Types of Data
+
+To read in other types of data check out additional tidyverse packages:
+
+-   **haven** reads SPSS, Stata, and SAS files
+
+-   **readxl** reads excel files
+
+-   **DBI** along with a database backend (e.g. **RMySQL**, **RSQLite**, **RPostgreSQL** etc) allows you to run SQL queries against a database and return a data frame
+
+For hierarchical data use **jsonlite** for json, and **xml2** for XML.

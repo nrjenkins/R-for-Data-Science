@@ -1,0 +1,195 @@
+---
+title: "Chapter 12: Tidy Data"
+output: html_notebook
+---
+
+## Tidy Data
+
+### Exercises
+
+1.  Using prose, describe how the variables and observations are organised in each of the sample tables.
+
+    In `table1`, each variable has a column, each row is an observation, and each cell is a value. In `table2`, the `type` and `count` variables are values and the corresponding variables for these values are in the `type` column. In `table3`, the `rate` variable contains two values, the case count and the population. In each of the tables in `table4`, the year variable is spread across multiple columns.
+
+2.  Compute the `rate` for `table2`, and `table4a` + `table4b`. You will need to perform four operations:
+
+    1.  Extract the number of TB cases per country per year.
+
+    2.  Extract the matching population per country per year.
+
+    3.  Divide cases by population, and multiply by 10000.
+
+    4.  Store back in the appropriate place.
+
+    Which representation is easiest to work with? Which is hardest? Why?
+
+    ```{r}
+    library(tidyverse)
+
+    table2 %>% 
+      pivot_wider(country:year, names_from = "type", values_from = "count") %>% 
+      mutate(rate = cases / population)
+
+    table3 %>% 
+      separate(rate, into = c("cases", "population"), sep = "/") %>%
+      mutate(across(cases:population, .fns = as.numeric)) %>% 
+      mutate(rate = cases / population)
+
+    table4a %>% 
+      pivot_longer(`1999`:`2000`, names_to = "year", values_to = "cases") %>% 
+      left_join(., table4b %>% 
+                  pivot_longer(`1999`:`2000`, names_to = "year", 
+                               values_to = "population"),
+                by = c("country", "year"))
+    ```
+
+3.  Recreate the plot showing change in cases over time using `table2` instead of `table1`. What do you need to do first?
+
+    ```{r}
+    table2 %>% 
+      pivot_wider(country:year, names_from = "type", values_from = "count") %>% 
+      ggplot(aes(x = year, y = cases, group = country, color = country)) +
+      geom_point() +
+      geom_line()
+    ```
+
+## Pivoting
+
+### Exercises
+
+1.  Why are `pivot_longer()` and `pivot_wider()` not perfectly symmetrical? Carefully consider the following example:
+
+```{r}
+stocks <- tibble(
+  year   = c(2015, 2015, 2016, 2016),
+  half  = c(   1,    2,     1,    2),
+  return = c(1.88, 0.59, 0.92, 0.17)
+)
+stocks
+
+stocks %>% 
+  pivot_wider(names_from = year, values_from = return) %>% 
+  pivot_longer(`2015`:`2016`, names_to = "year", values_to = "return")
+```
+
+(Hint: look at the variable types and think about column *names*.)
+
+`pivot_longer()` has a `names_ptypes` argument, e.g. `names_ptypes = list(year = double())`. What does it do?
+
+`names_ptypes` is used to define the column types.
+
+2.  Why does this code fail?
+
+    ```{r}
+    table4a %>% 
+      pivot_longer(c(1999, 2000), names_to = "year", values_to = "cases")
+    ```
+
+    1999, and 2000 are non-syntactic names and need to be enclosed in backticks.
+
+3.  What would happen if you widen this table? Why? How could you add a new column to uniquely identify each value?
+
+    ```{r}
+    people <- tribble(
+      ~name,             ~names,  ~values,
+      #-----------------|--------|------
+      "Phillip Woods",   "age",       45,
+      "Phillip Woods",   "height",   186,
+      "Phillip Woods",   "age",       50,
+      "Jessica Cordero", "age",       37,
+      "Jessica Cordero", "height",   156
+    )
+    ```
+
+    Widening the table is problematic because there is no unique row identifier. We can add one and widen like so:
+
+    ```{r}
+    people %>% 
+      group_by(name) %>% 
+      mutate(obs_id = row_number()) %>% 
+      pivot_wider(id_cols = c(name, obs_id), names_from = names, 
+                  values_from = values)
+    ```
+
+4.  Tidy the simple tibble below. Do you need to make it wider or longer? What are the variables?
+
+    ```{r}
+    preg <- tribble(
+      ~pregnant, ~male, ~female,
+      "yes",     NA,    10,
+      "no",      20,    12
+    )
+    preg
+    ```
+
+    `male` and `female` are values for a `sex` variable.
+
+    ```{r}
+    preg %>% 
+      pivot_longer(cols = c(male, female), names_to = "sex", values_to = "count",
+                   values_drop_na = TRUE)
+    ```
+
+## Separating and Uniting
+
+### Exercises
+
+1.  What do the `extra` and `fill` arguments do in `separate()`? Experiment with the various options for the following two toy datasets.
+
+    ```{r}
+    tibble(x = c("a,b,c", "d,e,f,g", "h,i,j")) %>% 
+      separate(x, c("one", "two", "three"))
+
+    tibble(x = c("a,b,c", "d,e", "f,g,i")) %>% 
+      separate(x, c("one", "two", "three"))
+    ```
+
+    `extra` give instructions for what to do if there are more columns produced than columns defined. `fill` allows you to fill in missing values.
+
+2.  Both `unite()` and `separate()` have a `remove` argument. What does it do? Why would you set it to `FALSE`?
+
+    `remove` drops the input columns used. You set it to `FALSE` if you wanted to keep the original variables.
+
+3.  Compare and contrast `separate()` and `extract()`. Why are there three variations of separation (by position, by separator, and with groups), but only one unite?
+
+    `extract()` separates columns based on a regular expression rather than a common separator.
+
+## Missing Values
+
+### Exercises
+
+1.  Compare and contrast the `fill` arguments to `pivot_wider()` and `complete()`.
+
+    In `pivot_wider()` the `values_fill` argument fills each missing value with a specified value. In `complete()` `fill` fills values for missing combinations of values.
+
+2.  What does the direction argument to `fill()` do?
+
+    It specifies which direction values should be filled from.
+
+## Case Study
+
+### Exercises
+
+1.  In this case study I set `values_drop_na = TRUE` just to make it easier to check that we had the correct values. Is this reasonable? Think about how missing values are represented in this dataset. Are there implicit missing values? What's the difference between an `NA` and zero?
+
+    ```{r}
+
+    ```
+
+2.  What happens if you neglect the `mutate()` step? (`mutate(names_from = stringr::str_replace(key, "newrel", "new_rel"))`)
+
+    ```{r}
+
+    ```
+
+3.  I claimed that `iso2` and `iso3` were redundant with `country`. Confirm this claim.
+
+    ```{r}
+
+    ```
+
+4.  For each country, year, and sex compute the total number of cases of TB. Make an informative visualisation of the data.
+
+    ```{r}
+
+    ```
