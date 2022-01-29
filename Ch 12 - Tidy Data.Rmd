@@ -168,28 +168,58 @@ stocks %>%
 
 ## Case Study
 
+```{r}
+who.clean <- 
+  who %>%
+  pivot_longer(
+    cols = new_sp_m014:newrel_f65, 
+    names_to = "key", 
+    values_to = "cases", 
+    values_drop_na = TRUE
+  ) %>% 
+  mutate(
+    key = stringr::str_replace(key, "newrel", "new_rel")
+  ) %>%
+  separate(key, c("new", "var", "sexage"), sep = "_") %>% 
+  select(-new, -iso2, -iso3) %>% 
+  separate(sexage, c("sex", "age"), sep = 1)
+```
+
 ### Exercises
 
 1.  In this case study I set `values_drop_na = TRUE` just to make it easier to check that we had the correct values. Is this reasonable? Think about how missing values are represented in this dataset. Are there implicit missing values? What's the difference between an `NA` and zero?
 
     ```{r}
+    who.clean %>% count(country)
+    ```
 
+    Given the differences the number of countries, it's safe to assume that there are implicit missing values.
+
+    ```{r}
+    who.clean %>% complete(country, year)
     ```
 
 2.  What happens if you neglect the `mutate()` step? (`mutate(names_from = stringr::str_replace(key, "newrel", "new_rel"))`)
 
-    ```{r}
-
-    ```
+    Without this, we wouldn't be able to separate the data.
 
 3.  I claimed that `iso2` and `iso3` were redundant with `country`. Confirm this claim.
 
     ```{r}
-
+    who3 %>% 
+      select(country, iso2, iso3) %>% 
+      distinct() %>% 
+      group_by(country) %>% 
+      filter(n() > 1)
     ```
 
-4.  For each country, year, and sex compute the total number of cases of TB. Make an informative visualisation of the data.
+4.  For each country, year, and sex compute the total number of cases of TB. Make an informative visualization of the data.
 
     ```{r}
-
+    who.clean %>% 
+      group_by(country, year, sex) %>% 
+      summarise(tb_cases = sum(cases)) %>% 
+      unite(country_sex, country, sex, remove = FALSE) %>% 
+      ggplot(aes(x = year, y = tb_cases, group = country_sex, color = sex)) +
+      geom_line()
     ```
