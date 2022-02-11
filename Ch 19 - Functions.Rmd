@@ -1,0 +1,357 @@
+---
+title: "Chapter 19: Functions"
+output: html_notebook
+---
+
+Functions allow you to automate common tasks in a more powerful and general way than copy-and-pasting. Writing a function has three advantages over using copy-and-paste:
+
+1.  You can give a function an evocative name that makes your code easier to understand.
+2.  As requirements change, you only need to update code in one place, instead of many.
+3.  You eliminate the change of making incidental mistakes when you copy and paste.
+
+## When should you write a function?
+
+You should consider writing a function whenever you've copied and pasted a block of code more than twice.
+
+```{r}
+df <- tibble::tibble(
+  a = rnorm(10),
+  b = rnorm(10),
+  c = rnorm(10),
+  d = rnorm(10)
+)
+
+df$a <- (df$a - min(df$a, na.rm = TRUE)) / 
+  (max(df$a, na.rm = TRUE) - min(df$a, na.rm = TRUE))
+
+df$b <- (df$b - min(df$b, na.rm = TRUE)) / 
+  (max(df$b, na.rm = TRUE) - min(df$a, na.rm = TRUE))
+
+df$c <- (df$c - min(df$c, na.rm = TRUE)) / 
+  (max(df$c, na.rm = TRUE) - min(df$c, na.rm = TRUE))
+
+df$d <- (df$d - min(df$d, na.rm = TRUE)) / 
+  (max(df$d, na.rm = TRUE) - min(df$d, na.rm = TRUE))
+```
+
+To write a function, you need to first analyze the code. How many inputs does it have?
+
+```{r}
+(df$a - min(df$a, na.rm = TRUE)) / 
+  (max(df$a, na.rm = TRUE) - min(df$a, na.rm = TRUE))
+```
+
+This code only has one input. We can rewrite the code with temporary variable names:
+
+```{r}
+x <- df$a
+
+(x - min(x, na.rm = TRUE)) / 
+  (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+```
+
+This has duplicate code. We're computing the range of the data three times, so it makes sense to do it in one step:
+
+```{r}
+rng <- range(x, na.rm = TRUE)
+
+(x - rng[1]) / (rng[2] - rng[1])
+```
+
+With the simplified code, we can turn it into a function:
+
+```{r}
+rescale01 <- function(x) {
+  rng <- range(x, na.rm = TRUE)
+  (x - rng[1]) / (rng[2] - rng[1])
+}
+
+rescale01(c(0, 5, 10))
+```
+
+There are three key steps to creating a new function:
+
+1.  You need to pick a name for the function.
+2.  You list the inputs, or arguments, to the function inside `function`. Here we just have one argument.
+3.  You place the code you have developed in the body of the function.
+
+We can simplify the original example now that we have a function:
+
+```{r}
+df$a <- rescale01(df$a)
+df$b <- rescale01(df$b)
+df$c <- rescale01(df$c)
+df$d <- rescale01(df$d)
+```
+
+This can be improved with a for loop:
+
+```{r}
+rescaled_data <- vector("list", ncol(df))
+for (i in seq_along(rescaled_data)) {
+  rescaled_data[[i]] <- rescale01(df[[i]])
+}
+rescaled_data
+```
+
+### Exercises
+
+1.  Why is `TRUE` not a parameter to `rescale01()`? What would happen if `x` contained a single missing value, and `na.rm` was `FALSE`?
+
+    `TRUE` is not a parameter because it is an argument. If it was set to false, the function would produce a `NA` value.
+
+2.  In the second variant of `rescale01()`, infinite values are left unchanged. Rewrite `rescale01()` so that `-Inf` is mapped to 0, and `Inf` is mapped to 1.
+
+    ```{r}
+    rescale01 <- function(x) {
+      rng <- range(x, na.rm = TRUE, finite = TRUE)
+      y <- (x - rng[1]) / (rng[2] - rng[1])
+      y[y == -Inf] <- 0
+      y[y == Inf] <- 1
+      y
+    }
+
+    x <- c(1:10, Inf, -Inf)
+    rescale01(x)
+    ```
+
+3.  Practice turning the following code snippets into functions. Think about what each function does. What would you call it? How many arguments does it need? Can you rewrite it to be more expressive or less duplicative?
+
+    ```{r}
+    # 1
+    x <- c(1:10, NA, NA, NA)
+    mean(is.na(x))
+
+    prop_na <- function(x) {
+      sum(is.na(x)) / length(x)
+    }
+    prop_na(x)
+
+    # 2
+    x / sum(x, na.rm = TRUE)
+
+    std_to_one <- function(x) {
+      x / sum(x, na.rm = TRUE)
+    }
+    std_to_one(x)
+
+    # 3
+    sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE)
+
+    std_variation <- function(x) {
+      sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE)
+    }
+    std_variation(x)
+    ```
+
+4.  Write your own functions to compute the variance and skewness of a numeric vector.
+
+    ```{r}
+    x <- c(1, 2, 5, 100)
+    variance <- function(x) {
+      sum((x - mean(x))^2) / (length(x) - 1)
+    }
+    variance(x)
+    var(x)
+
+    skew <- function(x) {
+      sum((x - mean(x))^3) / ((length(x) - 2) * var(x)^(3/2))
+    }
+    skew(x)
+    ```
+
+5.  Write `both_na()`, a function that takes two vectors of the same length and returns the number of positions that have an `NA` in both vectors.
+
+    ```{r}
+    both_na <- function(x, y) {
+      sum(is.na(x) & is.na(y))
+    }
+
+    x <- c(NA, 32, 45, NA, NA)
+    y <- c(34, 75, NA, NA, 18)
+
+    both_na(x, y)
+    ```
+
+6.  What do the following functions do? Why are they useful even though they are so short?
+
+    ```{r}
+    is_directory <- function(x) file.info(x)$isdir
+    is_readable <- function(x) file.access(x, 4) == 0
+    ```
+
+7.  Read the complete lyrics to "Little Bunny Foo Foo." There's a lot of duplication in this song. Extent the initial piping example to recreate the complete song, and use functions to reduce the duplication.
+
+    ```{r}
+
+    ```
+
+## Functions are for humans and computers
+
+### Exercises
+
+1.  Read the source code for each of the following three functions, puzzle out what they do, and then brainstorm better names:
+
+    ```{r}
+    f1 <- function(string, prefix) {
+      substr(string, 1, nchar(prefix)) == prefix
+    }
+
+    f1("Nicholas Jenkins", "Nic")
+
+    string_subset <- function(string, prefix) {
+      substr(string, 1, nchar(prefix)) == prefix
+    }
+
+    drop_last <- function(x) {
+      if (length(x) <= 1) return(NULL)
+      x[-length(x)]
+    }
+    x <- c(1:9)
+    f2(x)
+
+    repeate <- function(x, y) {
+      rep(y, length.out = length(x))
+    }
+
+    y <- c(1:3)
+    f3(x, y)
+    ```
+
+2.  Take a function that you've written recently and spend 5 minutes brainstorming a better name for it and its arguments.
+
+3.  Compare and contrast `rnorm()` and `MASS:mvrnorm()`. How could you make them more consistent?
+
+    ```{r}
+    rnorm
+
+    MASS::mvrnorm
+    ```
+
+4.  Make the case for why `norm_r()`, `norm_d()` etc. would be better than `rnorm()`, `dnorm()`. Make a case for the opposite.
+
+## Conditional Execution
+
+An `if` statement allows you to conditionally execute code:
+
+```{r}
+if (condition) {
+  # code executed when condition is TRUE
+} else {
+  # code executed when condition is FALSE
+}
+```
+
+Here is a simple function that uses an `if` statement. The goal of this function is to return a logical vector describing whether or not each element of a vector is named.
+
+```{r}
+has_name <- function(x) {
+  nms <- names(x)
+  if (is.null(nms)) {
+    rep(FALSE, length(x))
+  } else {
+    !is.na(nms) & nms != ""
+  }
+}
+```
+
+### Conditions
+
+### Exercises
+
+1.  What's the difference between `if` and `ifelse()`? Carefully read the help documentation and construct three examples that illustrate the key differences.
+
+    `if` is not vectorized so it only tests a single condition and `ifelse()` tests each element.
+
+    ```{r}
+
+    ```
+
+2.  Write a greeting function that says "good morning," "good afternoon", or "good evening", depending on the time of day.
+
+    ```{r}
+    greeting <- function(time = lubridate::now()) {
+      hour <- lubridate::hour(time)
+      if (hour >= 6 && hour < 12) {
+        print("good morning")
+      } else if (hour >= 12 && hour < 17) {
+        print("good afternoon")
+      } else {
+        print("good evening")
+      }
+    }
+
+    greeting(lubridate::ymd_h("2022-02-09-21"))
+    ```
+
+3.  Implement a `fizzbuzz` function. It takes a single number as input. If the number is divisible by three, it returns "fizz". If it's divisible by five it returns "buzz". If it's divisible by three and five, it returns "fizzbuzz". Otherwise, it returns the number. Make sure you first write working code before you create the function.
+
+    ```{r}
+    6 %% 3
+
+    fizzbuzz <- function(x) {
+      if (x %% 3 == 0 && x %% 5 != 0) {
+        print("fizz")
+      } else if (x %% 3 != 0 && x %% 5 == 0) {
+        print("buzz")
+      } else if (x %% 3 == 0 && x %% 5 == 0) {
+        print("fizzbuzz")
+      } else {
+        print(x)
+      }
+    }
+
+    fizzbuzz(25)
+    ```
+
+4.  How could you use `cut()` to simplify this set of nested if-else statements?
+
+    ```{r}
+    if (temp <= 0) {
+      "freezing"
+    } else if (temp <= 10) {
+      "cold"
+    } else if (temp <= 20) {
+      "cool"
+    } else if (temp <= 30) {
+      "warm"
+    } else {
+      "hot"
+    }
+
+    cut(temp, c(-Inf, 0, 10, 20, 30, Inf),
+        right = TRUE,
+        labels = c("freezing", "cold", "cool", "warm", "hot"))
+    ```
+
+5.  What happens if you use `switch()` with numeric values?
+
+    It will be coerced to an integer.
+
+6.  What does this `switch()` call do? What happens if `x` is "e"?
+
+    ```{r}
+    switch("e", 
+      a = ,
+      b = "ab",
+      c = ,
+      d = "cd"
+    )
+    ```
+
+## Function arguments
+
+### Exercises
+
+1.  What does `commas(letters, collapse = "-")` do? Why?
+
+    ```{r}
+    commas <- function(...) stringr::str_c(..., collapse = "-")
+    commas(letters[1:10])
+    ```
+
+2.  It'd be nice if you could supply multiple characters to the `pad` argument, e.g. `rule("title", pad = "-+")`. Why doesn't this currently work? How could you fix it?
+
+    ```{r}
+
+    ```

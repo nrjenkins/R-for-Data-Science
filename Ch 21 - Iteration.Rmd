@@ -1,0 +1,626 @@
+---
+title: "Chapter 21: Iteration"
+output: html_notebook
+---
+
+Iteration is helpful when you need to do the same thing to multiple inputs: repeating the same operation on different columns, or on different datasets.
+
+```{r}
+library(tidyverse)
+```
+
+## For loops
+
+Imagine we have this simple tibble:
+
+```{r}
+df <- tibble(
+  a = rnorm(10),
+  b = rnorm(10),
+  c = rnorm(10),
+  d = rnorm(10)
+)
+```
+
+We want to compute the median of each column. We could do it with copy-and-paste:
+
+```{r}
+median(df$a)
+median(df$b)
+median(df$c)
+median(df$d)
+```
+
+But, it would be better to use a for loop:
+
+```{r}
+output <- vector("double", ncol(df)) # 1. output
+for (i in seq_along(df)) {           # 2. sequence
+  output[[i]] <- median(df[[i]])     # 3. body
+}
+
+output
+
+# or
+summarize(df, across(.cols = everything(), ~ median(.)))
+```
+
+### Exercises
+
+1.  Write for loops to:
+
+    1.  Compute the mean of every column in `mtcars`
+
+    ```{r}
+    means <- vector("double", ncol(mtcars))
+    for (i in 1:ncol(mtcars)) {
+      means[[i]] <- mean(mtcars[[i]])
+    }
+
+    means
+    ```
+
+    2.  Determine the type of each column in `nycflights13::flights`
+
+    ```{r}
+    d_types <- vector("list", ncol(nycflights13::flights))
+    for (i in seq_along(d_types)) {
+      d_types[[i]] <- class(nycflights13::flights[[i]])
+    }
+
+    d_types
+    ```
+
+    3.  Compute the number of unique values in each column of `iris`
+
+    ```{r}
+    ptm <- proc.time()
+    n_values <- vector("double", ncol(iris))
+    for (i in seq_along(n_values)) {
+      n_values[[i]] <- n_distinct(iris[[i]])
+    }
+
+    n_values
+    proc.time() - ptm
+
+    ptm2 <- proc.time()
+    summarize(iris, across(.cols = everything(), ~ n_distinct(.)))
+    proc.time() - ptm2
+    ```
+
+    3.  Generate 10 random normals from distributions with means of -10, 0, 10, and 100
+
+    ```{r}
+    n <- 10
+    mu <- c(-10, 0, 10, 100)
+    normals <- vector("list", length(mu))
+
+    for (i in seq_along(normals)) {
+      normals[[i]] <- rnorm(n = n, mean = mu[i])
+    }
+
+    normals
+    ```
+
+2.  Eliminate the for loop in each of the following examples by taking advantage of an existing function that works with vectors:
+
+    ```{r}
+    out <- ""
+    for (x in letters) {
+      out <- stringr::str_c(out, x)
+    }
+    out
+
+    str_c(letters, collapse = "")
+    ```
+
+    ```{r}
+    x <- sample(100)
+    sd <- 0
+    for (i in seq_along(x)) {
+      sd <- sd + (x[i] - mean(x)) ^ 2
+    }
+    sd <- sqrt(sd / (length(x) - 1))
+
+    sd
+
+    sd(x)
+    ```
+
+    ```{r}
+    x <- runif(100)
+    out <- vector("numeric", length(x))
+    out[1] <- x[1]
+    for (i in 2:length(x)) {
+      out[i] <- out[i - 1] + x[i]
+    }
+
+    out
+
+    cumsum(x)
+    ```
+
+    1.  Combine your function writing and for loop skills:
+
+        1.  Write a for loop that `prints()` the lyrics to the children's song "Alice the camel."
+
+```{r}
+num_humps <- c("five", "four", "three", "two", "one")
+
+for (i in seq_along(num_humps)) {
+  line <- paste("Alice the camel has ", num_humps[[i]], " humps.", sep = "")
+  lines <- rep(line, 3)
+  writeLines(lines)
+  
+  writeLines("so go, Alice, go.\n")
+}
+```
+
+        2.  Convert the nursery rhyme "ten in the bed" to a function. Generalize it to any number of people in any sleeping structure.
+
+```{r}
+num_people <- c(1:10)
+location <- c("bed")
+
+for (i in seq_along(num_people)) {
+  num <- sort(num_people, decreasing = TRUE)
+  
+  if (num[[i]] == 1) {
+    one_line <- paste0("There was 1 in the ", location, " and the little one said, good night!")
+    writeLines(one_line)
+  } else {
+    line <- paste0("There were ", num[[i]], " in the ", location, " and the little one said, roll over! Roll over! So they all rolled over and the one fell out.")
+    writeLines(line)
+  }
+}
+
+num_people <- 4
+
+nursery_rhyme <- function(num_people, location) {
+  output <- vector("character", num_people)
+  
+  num <- c(1:num_people)
+  num <- sort(num, decreasing = TRUE)
+  
+  for (i in seq_along(output)) {
+    
+    if (num[[i]] == 1) {
+      one_line <- paste0("There was 1 in the ", location, " and the little one said, good night!")
+      writeLines(one_line)
+    } else {
+      line <- paste0("There were ", num[[i]], " in the ", location, " and the little one said, roll over! Roll over! So they all rolled over and the one fell out.")
+      writeLines(line)
+    }
+  }
+}
+
+nursery_rhyme(4, "house")
+```
+
+3.  Convert the song "99 bottles of beer on the wall" to a function. Generalize to any number of any vessel containing any liquid on any surface.
+
+```{r}
+n <- 4
+container <- "bottle"
+liquid <- "beer"
+surface <- "wall"
+
+liquid_song <- function(n, container, liquid, surface) {
+  output <- vector("character", n)
+  
+  num <- c(1:n)
+  num <- sort(num, decreasing = TRUE)
+  
+  for (i in seq_along(num)) {
+    if (num[[i]] == 1) {
+      one_line <- paste0(num[[i]], " ", container, " of ", liquid, " on the ", surface, ". ", 
+                         num[[i]], " ", container, " of ", liquid, ". ", 
+                         "Take it down, pass it around, ", num[[i]], " ", container, 
+                         " of ", liquid, " on the ", surface, ". ")
+      writeLines(one_line)
+    } else {
+      line <- paste0(num[[i]], " ", container, "s of ", liquid, " on the ", surface, ". ", 
+                     num[[i]], " ", container, "s of ", liquid, ". ", 
+                     "Take one down, pass it around, ", num[[i]], " ", container, 
+                     "s of ", liquid, " on the ", surface, ". ")
+      writeLines(line)
+    }
+  }
+}
+
+liquid_song(13, "cup", "milk", "floor")
+```
+
+## For loop variations
+
+There are four variations on the basic theme of the for loop:
+
+1.  Modifying an existing object, instead of creating a new object.
+2.  looping over names or values, instead of indicies.
+3.  Handling outputs of unknown length.
+4.  Handling sequences of unknown length.
+
+### Modifying an existing object
+
+Sometimes you want to use a for loop to modify an existing object. For example, rescaling every column in a data frame:
+
+```{r}
+df <- tibble(
+  a = rnorm(10),
+  b = rnorm(10),
+  c = rnorm(10),
+  d = rnorm(10)
+)
+rescale01 <- function(x) {
+  rng <- range(x, na.rm = TRUE)
+  (x - rng[1]) / (rng[2] - rng[1])
+}
+
+df$a <- rescale01(df$a)
+df$b <- rescale01(df$b)
+df$c <- rescale01(df$c)
+df$d <- rescale01(df$d)
+```
+
+To solve this with a for loop we again think about the three components:
+
+1.  Output
+2.  Sequence: we can think about a data frame as a list of columns, we we can iterate over each column with `seq_along(df)`.
+3.  Body: apply `rescale01()`.
+
+This give us:
+
+```{r}
+for (i in seq_along(df)) {
+  df[[i]] <- rescale01(df[[i]])
+}
+
+df
+```
+
+### Looping patterns
+
+There are three basic ways to loop over a vector. So far we've seen looking over the numeric indices with `for (i in seq_along(xs))`, and extracting the value with `x[[i]]`. There are two other forms:
+
+1.  Loop over the elements: `for (x in xs)`. This form makes it difficult to save output efficiently.
+
+2.  Loop over the names: `for (nm in names(xs)`. This give you a name, which you can use to access the value with `x[[nm]]`. This is useful if you want to use the name in a plot title or a file name. If you're creating a named output, make sure to name the results vector like so:
+
+    ```{r eval = FALSE}
+    results <- vector("list", length(x))
+    names(results) <- names(x)
+    ```
+
+Iteration over the numeric indices is the most general form, because given the position you can extract both the name and the value:
+
+```{r}
+for (i in seq_along(x)) {
+  name <- names(x)[[i]]
+  value <- x[[i]]
+}
+```
+
+### Unknown output length
+
+Sometimes you don't know how long the output will be. For example, suppose you want to simulate some random vectors of random lengths. You can do this by saving the results to a list, and then combine into a single vector after the loop is done:
+
+```{r}
+out <- vector("list", length(means))
+for (i in seq_along(means)) {
+  n <- sample(100, 1)
+  out[[i]] <- rnorm(n, means[[1]])
+}
+str(unlist(out))
+```
+
+`unlist()` flattens a list of vectors into a single vector.
+
+### Unknown sequence length
+
+Sometimes you don't even know how long the input sequence should run for. You might want to loop until you get three heads in a row. You can't do that with a for loop. Instead you need a while loop.
+
+```{r eval = FALSE}
+while (condition) {
+  # body
+}
+```
+
+A while loop is more general than a for loop because you can rewrite any for loop as a while loop, but you can't rewrite every while loop as a for loop:
+
+```{r}
+for (i in seq_along(x)) {
+  # body
+}
+
+# equivalent to 
+i <- 1
+while (i <= length(x)) {
+  # body
+  i <- i + 1
+}
+```
+
+Here's how we could use a while loop to find how many tries it takes to get three heads in a row:
+
+```{r}
+flip <- function() sample(c("T", "H"), 1)
+
+flips <- 0
+nheads <- 0
+
+while (nheads < 3) {
+  if (flip() == "H") {
+    nheads <- nheads + 1
+  } else {
+    nheads <- 0
+  }
+  flips <- flips + 1
+}
+
+flips
+```
+
+### Exercises
+
+1.  Imagine you have a directory full of CSV files that you want to read in. You have their paths in a vector, `files <- dir("data/", pattern = "\\.csv$", full.names = TRUE)`, and now want to read each one with `read_csv()`. Write the for loop that will load them into a single data frame.
+
+    ```{r}
+    for (variable in seq_along(files)) {
+      data[[i]] <- read_csv(files[[i]])
+    }
+
+    dplyr::bind_rows(data)
+    ```
+
+2.  What happens if you use `for (nm in names(x))` and `x` has no names? What if only some of the elements are named? What if the names are not unique?
+
+    If there are no names, then the length will be 0. If only some have names you will get an error message.
+
+3.  Write a function that prints the mean of each numeric column in a data frame, along with its name. For example, `show_mean(iris)` would print:
+
+    ```{r eval = FALSE}
+    show_mean(iris)
+    #> Sepal.Length: 5.84
+    #> Sepal.Width:  3.06
+    #> Petal.Length: 3.76
+    #> Petal.Width:  1.20
+    ```
+
+    ```{r}
+    data(iris)
+
+    means <- vector("double", length(iris))
+    for (i in seq_along(means)) {
+      if (is.numeric(iris[[i]])) {
+        means[[i]] <- mean(iris[[i]])
+      }
+    }
+
+    means
+
+    col_means <- function(data, na.rm, digits) {
+      df <- vector("logical", length(iris))
+      for (i in seq_along(df)) {
+        df[[i]] <- is.numeric(data[[i]])
+      }
+      
+      num_data <- data[df]
+      
+      means <- vector("double", length(num_data))
+      for (i in seq_along(means)) {
+        means[[i]] <- mean(num_data[[i]], na.rm = na.rm)
+      }
+      means <- round(means, digits = digits)
+      print(means)
+    }
+    col_means(iris, "TRUE", 3)
+    ```
+
+4.  What does this code do? How does it work?
+
+    ```{r}
+    trans <- list( 
+      disp = function(x) x * 0.0163871,
+      am = function(x) {
+        factor(x, labels = c("auto", "manual"))
+      }
+    )
+
+
+    for (var in names(trans)) {
+      mtcars[[var]] <- trans[[var]](mtcars[[var]])
+    }
+    mtcars
+    ```
+
+## For loops vs. functionals
+
+R is a functional programming language, which means that you can wrap up for loops in a function, and call that function instead of using the for loop directly.
+
+The goal of using purrr functions instead of for loops is to allow you to break common list manipulation challenges into independent pieces:
+
+1.  How can you solve the problem for a single element of the list? Once you've solved that problem, purrr takes care of generalizing your solution to every element in the list.
+2.  If you're solving a complex problem, how can you break it down into bite-sized pieces that allow you to advance one small step towards a solution? With purr, you get lots of small pieces that you can compose together with a pipe.
+
+### Exercises
+
+1.  Read the documentation for `apply()`. In the 2d case, what two for loops does it generalize?
+
+    ```{r}
+    apply(iris, 2, mean)
+    ```
+
+    `apply()` generalizes for loops that apply a single function to multiple columns or rows.
+
+2.  Adapt `col_summary()` so that it only applies to numeric columns. You might want to start with an `is_numeric()` function that returns a logical vector that has a `TRUE` corresponding to each numeric column.
+
+    ```{r}
+    col_summary <- function(df, fun) {
+      num_data <- vector("logical", length(df))
+      for (i in seq_along(num_data)) {
+        num_data[[i]] <- is.numeric(df[[i]])
+      }
+      num_data <- df[num_data]
+      
+      out <- vector("double", length(num_data))
+      for (i in seq_along(out)) {
+        out[i] <- fun(num_data[[i]])
+      }
+      out
+    }
+
+    col_summary(iris, mean)
+    ```
+
+## The map functions
+
+The pattern of looping over a vector, doing something to each element and saving the result is so common that the purr package provides a family of functions to do it for your. There is one function for each type of output:
+
+-   `map()` makes a list.
+
+-   `map_lgl()` makes a logical vector.
+
+-   `map_int()` makes an integer vector.
+
+-   `map_dbl()` makes a double vector.
+
+-   `map_chr()` makes a character vector.
+
+Each function takes a vector as input, applies a function to each piece, and then returns a new vector that's the same length as the input. The type of the vector is determined by the suffix to the map function.
+
+We can use these functions to perform the same computations as the last for loop. Those summary functions returned doubles, so we need to use `map_dbl()`:
+
+```{r}
+df <- tibble(
+  a = rnorm(10),
+  b = rnorm(10),
+  c = rnorm(10),
+  d = rnorm(10)
+)
+
+map_dbl(df, mean)
+
+# or
+out <- vector("double", length(df))
+for (i in seq_along(out)) {
+  out[[i]] <- mean(df[[i]])
+}
+out
+
+map_dbl(df, median)
+```
+
+### Shortcuts
+
+Imagine you want to fit a linear regression to each group in a dataset. This example splits up the `mtcars` dataset into three pieces and fits the same linear model to each piece:
+
+```{r}
+models <- 
+  mtcars %>% 
+  split(.$cyl) %>% 
+  map(function(df) lm(mpg ~ wt, data = df))
+models
+```
+
+This syntax can be simplified to:
+
+```{r}
+models <- 
+  mtcars %>% 
+  split(.$cyl) %>% 
+  map(~ lm(mpg ~ wt, data = .))
+```
+
+You might want to extract a summary statistic like the $R^2$. To do that we need to run `summary()` on each element then extract the component called `r.squared`.
+
+```{r}
+models %>% 
+  map(summary) %>% 
+  map_dbl(~ .$r.squared)
+```
+
+This can be simplified even further using a string.
+
+```{r}
+models %>% 
+  map(summary) %>% 
+  map_dbl("r.squared")
+```
+
+### Base R
+
+-   `lapply()` is almost identical to `map()`, except that `map()` is consistent with all the other functions in purrr, and you can use the shortcuts for `.f`.
+
+-   Base `sapply()` is a wrapper around `lapply()` that automatically simplifies the output.
+
+-   `vapply()` is a safe alternative to `sapply()` because you supply an additional argument that defines the type.
+
+### Exercises
+
+1.  Write code that uses one of the map functions to:
+
+    1.  Compute the mean of every column in `mtcars`.
+
+    ```{r}
+    map_dbl(mtcars, mean)
+    ```
+
+    1.  Determine the type of each column in [`nycflights13::flights`](https://rdrr.io/pkg/nycflights13/man/flights.html).
+
+    ```{r}
+    map_chr(nycflights13::flights, typeof)
+    ```
+
+    1.  Compute the number of unique values in each column of `iris`.
+
+    ```{r}
+    map_dbl(iris, n_distinct)
+    ```
+
+    1.  Generate 10 random normals from distributions with means of -10, 0, 10, and 100.
+
+    ```{r}
+    n <- 10
+    means <- c(-10, 0, 10, 100)
+    output <- vector("list", length(means))
+
+    for (i in seq_along(output)) {
+      output[[i]] <- rnorm(n = n, mean = means[[i]])
+    }
+    output
+
+    map(means, ~ rnorm(n = n, mean = .))
+
+    # or
+    means %>% 
+      map(~ rnorm(n = n, mean = .))
+
+    # or 
+    map(c(-10, 0, 10, 100), ~ rnorm(n = n, mean = .))
+    ```
+
+2.  How can you create a single vector that for each column in a data frame indicates whether or not it's a factor?
+
+    ```{r}
+    map_lgl(iris, is.factor) 
+    ```
+
+3.  What happens when you use the map functions on vectors that aren't lists? What does `map(1:5, runif)` do? Why?
+
+    ```{r}
+    map(1:5, runif)
+    ```
+
+4.  What does `map(-2:2, rnorm, n = 5)` do? Why? What does `map_dbl(-2:2, rnorm, n = 5)` do? Why?
+
+    ```{r}
+    map(-2:2, rnorm, n = 5)
+
+    map_dbl(-2:2, rnorm, n = 5)
+    ```
+
+5.  Rewrite `map(x, function(df) lm(mpg ~ wt, data = df))` to eliminate the anonymous function.
+
+    ```{r}
+    map(df, ~ lm(mpg ~ wt, data = .))
+    ```
