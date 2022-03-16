@@ -365,7 +365,6 @@ ggplot(sim2, aes(x)) +
     model_function(data = sim3, int = FALSE)
     ```
 
-```{=html}
 <!-- -->
-```
+
 4.  For `sim4`, which of `mod1` and `mod2` is better? I think `mod2` does a slightly better job at removing patterns, but it's pretty subtle. Can you come up with a plot to support my claim?
