@@ -1,0 +1,635 @@
+---
+title: "Chapter 25: Many Models"
+output: html_notebook
+---
+
+```{r}
+library(pacman)
+p_load(modelr, tidyverse)
+```
+
+## gapminder
+
+```{r}
+p_load(gapminder)
+gapminder
+```
+
+We want to answer: "how does life expectancy change over time for each country?"
+
+```{r}
+ggplot(gapminder, aes(year, lifeExp, group = country)) +
+  geom_line(alpha = 1/3)
+```
+
+To identify the countries that don't have upward trends, we'll fit a model with a linear trend. The model will capture steady growth over time, and the residuals will show what's left.
+
+```{r}
+nz <- filter(gapminder, country == "New Zealand")
+
+nz %>% 
+  ggplot(aes(year, lifeExp)) +
+  geom_line() +
+  ggtitle("Full data = ")
+
+nz_mod <- lm(lifeExp ~ year, data = nz)
+nz %>% 
+  add_predictions(nz_mod) %>% 
+  ggplot(aes(year, pred)) +
+  geom_line() +
+  ggtitle("Linear trend + ")
+
+nz %>% 
+  add_residuals(nz_mod) %>% 
+  ggplot(aes(year, resid)) +
+  geom_hline(yintercept = 0, color = "white", size = 3) +
+  geom_line() +
+  ggtitle("Remaining pattern")
+```
+
+How can we easily fit this to every country?
+
+### Nested data
+
+Extract out the common code with a function and repeat using a map function from purrr. This time, instead of repeating an action for each variable, we want to repeat an action for each country, a subset of rows. For that, we need a nested data frame.
+
+```{r}
+by_country <- gapminder %>% 
+  group_by(country, continent) %>% 
+  nest()
+
+by_country
+```
+
+```{r}
+by_country$data[[1]]
+```
+
+### List-columns
+
+With the nested data frame, we're in a good position to fit some models.
+
+```{r}
+country_model <- function(df) {
+  lm(lifeExp ~ year, data = df)
+}
+```
+
+We want to apply this to every data frame.
+
+```{r}
+models <- map(by_country$data, country_model)
+```
+
+Rather than storing the results in their own object, It's better to store them in as a column in the `by_country` data frame.
+
+```{r}
+by_country <- by_country %>% 
+  mutate(model = map(data, country_model))
+by_country
+```
+
+### Unnesting
+
+To get the residuals, we need to call `add_residuals()` with each model-data pair.
+
+```{r}
+by_country <- by_country %>% 
+  mutate(resids = map2(data, model, add_residuals))
+by_country
+```
+
+Now, we can turn the list of data frames back into a regular data frame.
+
+```{r}
+resids <- unnest(by_country, resids)
+resids
+```
+
+Now we can plot the residuals:
+
+```{r}
+resids %>% 
+  ggplot(aes(year, resid)) +
+  geom_line(aes(group = country), alpha = 1/3) +
+  geom_smooth(se = FALSE)
+```
+
+And facet by continent:
+
+```{r}
+resids %>% 
+  ggplot(aes(year, resid)) +
+  geom_line(aes(group = country), alpha = 1/3) +
+  geom_smooth(se = FALSE) +
+  facet_wrap(~ continent)
+```
+
+### Model quality
+
+```{r}
+p_load(broom)
+broom::glance(nz_mod)
+```
+
+We can use `mutate()` and `unnest()` to create a data frame with a row for each country:
+
+```{r}
+by_country %>% 
+  mutate(glance = map(model, glance)) %>% 
+  unnest(glance)
+```
+
+To drop the list columns, we use `.drop = TRUE` in `unnest()`:
+
+```{r}
+glance <- by_country %>% 
+  mutate(glance = map(model, glance)) %>% 
+  unnest(glance, .drop = TRUE)
+glance
+```
+
+Now we can look for models that don't fit well:
+
+```{r}
+glance %>% 
+  arrange(r.squared)
+```
+
+Let's plot out Africa since they have the worst models:
+
+```{r}
+glance %>% 
+  ggplot(aes(continent, r.squared)) +
+  geom_jitter(width = 0.5)
+```
+
+### Analyzing the Data with Multilevel Models
+
+Multilevel models are beneficial here because of the structure of the data:
+
+-   Time influences changes in the outcome variable for each country
+
+-   Countries have trends that influence the outcome
+
+-   Countries are nested within continents which can have trends
+
+-   Finally, time-based trends can be different across countries and continents too
+
+#### Clean the data
+
+```{r}
+library(pacman)
+p_load(ggrepel, brms, cmdstanr, tidybayes, ggh4x, lme4, emmeans)
+
+# center year on the first year of data (1952)
+gapminder_clean <- gapminder %>% 
+  mutate(year_c = year - 1952)
+
+# example countries
+countries <- tribble(
+  ~country,       ~continent,
+  "Egypt",        "Africa",
+  "Sierra Leone", "Africa",
+  "Pakistan",     "Asia",
+  "Yemen, Rep.",  "Asia",
+  "Bolivia",      "Americas",
+  "Canada",       "Americas",
+  "Italy",        "Europe",
+  "Portugal",     "Europe"
+)
+
+gapminder_clean <- gapminder_clean %>% 
+  mutate(highlight = country %in% countries$country)
+
+glimpse(gapminder_clean)
+```
+
+#### The effect of continent, country, and time on life expectancy
+
+```{r}
+ggplot(gapminder_clean, aes(x = year, y = lifeExp, 
+                      group = country, color = continent)) +
+  geom_line(aes(size = highlight)) +
+  geom_smooth(method = "lm", aes(color = NULL, group = NULL), 
+              color = "grey60", size = 1, linetype = "21",
+              se = FALSE, show.legend = FALSE) +
+  geom_label_repel(data = filter(gapminder_clean, year_c == 0, highlight == TRUE),
+                   aes(label = country), direction = "y", size = 3, seed = 1234,
+                   show.legend = FALSE) +
+  annotate(geom = "label", label = "Global trend", x = 1952, y = 50,
+           size = 3, color = "grey60") +
+  scale_size_manual(values = c(0.075, 1), guide = "none") +
+  #scale_color_okabe_ito(order = c(2, 3, 6, 1)) +
+  labs(x = NULL, y = "Life expectancy", color = "Continent") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+#### Regular regression
+
+We start with a model that ignores continent and country-level differences.
+
+```{r}
+pooling_fit <- lm(lifeExp ~ year_c,
+                  data = gapminder_clean)
+
+tidy(pooling_fit)
+```
+
+Plot the fitted regression.
+
+```{r}
+pooling_model_preds <- gapminder_clean %>% 
+  data_grid(country, year_c) %>% 
+  add_predictions(pooling_fit) %>% 
+  mutate(year = year_c + 1952) %>% 
+  select(-year_c) %>% 
+  left_join(gapminder_clean, by = c("country", "year"))
+
+set.seed(1)
+pooling_sample <- 
+  pooling_model_preds %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(pooling_sample, aes(x = year, y = pred)) +
+  # plot original data
+  geom_point(aes(y = lifeExp), shape = 21) +
+  # plot regression line
+  geom_line(color = "red") +
+  facet_nested_wrap(vars(continent, country))
+```
+
+#### Intercepts for each continent
+
+How much does life expectancy increase on average as time passes? In the previous model, `year` captures the global trend, but it doesn't account for continent or country-specific differences. We can see the failure of this omission by visualizing the residuals:
+
+```{r}
+pooling_model_resids <- gapminder_clean %>% 
+  add_residuals(pooling_fit)
+
+set.seed(1)
+pooling_resids_sample <- 
+  pooling_model_resids %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(pooling_resids_sample, aes(x = year, y = resid)) +
+  # plot residuals
+  geom_line(color = "red") +
+  facet_nested_wrap(vars(continent, country))
+```
+
+This plot shows the direction of our errors. Starting around 1995 in Botswana, the model predicted a much higher life expectancy than was actually the case. In general, the negative residual values mean that the model was overly optimistic - it predicted a higher life expectancy that actually occurred. The positive residual values mean that the model was too pessimistic - it predicted a lower life expectancy that actually occurred. We actually miss the mark with pretty much every country. We can do better.
+
+```{r}
+rand_int_fit <- lmer(lifeExp ~ year_c + (1 | continent),
+                     data = gapminder_clean)
+
+tidy(rand_int_fit)
+```
+
+##### Continent-level variance
+
+The random effects show how much variation there is in life expectancy across continents:
+
+```{r}
+tidy(rand_int_fit, effects = "ran_pars")
+```
+
+##### Continent-level random effects
+
+We can see the actual offsets with the `ranef()` function.
+
+```{r}
+continent_offsets <- ranef(rand_int_fit)$continent %>% 
+  as_tibble(rownames = "continent")
+continent_offsets
+```
+
+These values are the continent-specific offsets in the intercept. We can add these to the population intercept to see the actual intercept for each continent:
+
+```{r}
+coef(rand_int_fit)$continent %>% 
+  as_tibble(rownames = "continent")
+```
+
+##### Visualize continent-specific trends
+
+```{r}
+rand_int_model_preds <- gapminder_clean %>% 
+  data_grid(continent, country, year_c) %>% 
+  add_predictions(rand_int_fit) %>% 
+  mutate(year = year_c + 1952) %>% 
+  select(-year_c) %>% 
+  inner_join(gapminder_clean, by = c("continent", "country", "year"))
+
+set.seed(1)
+rand_int_sample <- 
+  rand_int_model_preds %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(rand_int_sample, aes(x = year, y = pred)) +
+  # plot original data
+  geom_point(aes(y = lifeExp), shape = 21) +
+  # plot pooling model predictions
+  geom_line(data = pooling_sample, color = "red") +
+  # plot regression line
+  geom_line(color = "blue") +
+  facet_nested_wrap(vars(continent, country))
+```
+
+How much did the continent intercept model improve the residuals?
+
+```{r}
+rand_int_model_resids <- gapminder_clean %>% 
+  add_residuals(rand_int_fit)
+
+set.seed(1)
+rand_int_resids_sample <- 
+  rand_int_model_resids %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(rand_int_resids_sample, aes(x = year, y = resid)) +
+  # plot pooling model residuals
+  geom_line(data = pooling_resids_sample, color = "red") +
+  # plot random intercept residuals
+  geom_line(color = "blue") +
+  facet_nested_wrap(vars(continent, country))
+```
+
+#### Intercepts for each country
+
+Instead of having intercepts for each continent, let's have intercepts for each country:
+
+```{r}
+int_fit <- lmer(lifeExp ~ year_c + (1 | country),
+                data = gapminder_clean)
+tidy(int_fit)
+```
+
+Let's examine the country offsets for our randomly sampled countries:
+
+```{r}
+ranef(int_fit)$country %>% 
+  as_tibble(rownames = "country") %>% 
+  filter(country %in% pooling_sample$country)
+```
+
+And the country specific intercepts:
+
+```{r}
+coef(int_fit)$country %>% 
+  as_tibble(rownames = "country") %>% 
+  filter(country %in% pooling_sample$country)
+```
+
+##### Visualize country-specific trends
+
+```{r}
+int_model_preds <- gapminder_clean %>% 
+  data_grid(continent, country, year_c) %>% 
+  add_predictions(int_fit) %>% 
+  mutate(year = year_c + 1952) %>% 
+  select(-year_c) %>% 
+  inner_join(gapminder_clean, by = c("continent", "country", "year"))
+
+set.seed(1)
+int_sample <- 
+  int_model_preds %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(int_sample, aes(x = year, y = pred)) +
+  # plot original data
+  geom_point(aes(y = lifeExp), shape = 21) +
+  # plot pooling model predictions
+  geom_line(data = pooling_sample, color = "red") +
+  # plot countinent intercept prediction
+  geom_line(data = rand_int_sample, color = "blue") +
+  # plot county intercept predictions
+  geom_line(color = "orange") +
+  facet_nested_wrap(vars(continent, country))
+```
+
+Let's check out the residuals for this new model:
+
+```{r}
+int_model_resids <- gapminder_clean %>% 
+  add_residuals(int_fit)
+
+set.seed(1)
+int_resids_sample <- 
+  int_model_resids %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(int_resids_sample, aes(x = year, y = resid)) +
+  # plot pooling model residuals
+  geom_line(data = pooling_resids_sample, color = "red") +
+  # plot continent intercept residuals
+  geom_line(data = rand_int_resids_sample, color = "blue") +
+  # plot country intercept residuals
+  geom_line(color = "orange") +
+  facet_nested_wrap(vars(continent, country))
+```
+
+#### Intercepts and slopes for each county + account for year-specific differences
+
+```{r}
+rand_model <- lmer(lifeExp ~ year_c + (1 | year_c) + (1 + year_c | country),
+                   data = gapminder_clean)
+
+tidy(rand_model)
+```
+
+##### Year-level random effects
+
+```{r}
+ranef(rand_model)$year_c %>% 
+  as_tibble(rownames = "year") %>% 
+  mutate(year = as.numeric(year) + 1952)
+
+```
+
+##### Visualize country-specific intercepts and slopes and year-specific intercepts
+
+```{r}
+rand_model_preds <- gapminder_clean %>% 
+  data_grid(continent, country, year_c) %>% 
+  add_predictions(rand_model) %>% 
+  mutate(year = year_c + 1952) %>% 
+  select(-year_c) %>% 
+  inner_join(gapminder_clean, by = c("continent", "country", "year"))
+
+set.seed(1)
+rand_sample <- 
+  rand_model_preds %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(rand_sample, aes(x = year, y = pred)) +
+  # plot original data
+  geom_point(aes(y = lifeExp), shape = 21) +
+  # plot pooling model predictions
+  geom_line(data = pooling_sample, color = "red") +
+  # plot countinent intercept prediction
+  geom_line(data = rand_int_sample, color = "blue") +
+  # plot county intercept predictions
+  geom_line(data = int_sample, color = "orange") +
+  geom_line(color = "black") +
+  facet_nested_wrap(vars(continent, country))
+```
+
+How much does this improve the residuals:
+
+```{r}
+rand_model_resids <- gapminder_clean %>% 
+  add_residuals(rand_model)
+
+set.seed(1)
+rand_resids_sample <- 
+  rand_model_resids %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(rand_resids_sample, aes(x = year, y = resid)) +
+  # plot pooling model residuals
+  geom_line(data = pooling_resids_sample, color = "red") +
+  # plot continent intercept residuals
+  geom_line(data = rand_int_resids_sample, color = "blue") +
+  # plot country intercept residuals
+  geom_line(data = int_resids_sample, color = "orange") +
+  geom_line(color = "black") +
+  facet_nested_wrap(vars(continent, country))
+```
+
+#### Full model
+
+```{r}
+full_fit <- lmer(lifeExp ~ year_c + I(year_c)^2 + (1 + year_c + I(year_c)^2 | continent / country),
+                 data = gapminder_clean)
+tidy(full_fit)
+
+full_model_preds <- gapminder_clean %>% 
+  add_predictions(full_fit) %>% 
+  mutate(year = year_c + 1952)
+
+set.seed(1)
+full_model_sample <- 
+  full_model_preds %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(full_model_sample, aes(x = year, y = pred)) +
+  # plot original data
+  geom_point(aes(y = lifeExp), shape = 21) +
+  # plot pooling model predictions
+  geom_line(data = pooling_sample, color = "red") +
+  # plot countinent intercept prediction
+  geom_line(data = rand_int_sample, color = "blue") +
+  # plot county intercept predictions
+  geom_line(data = int_sample, color = "orange") +
+  geom_line(data = rand_sample, color = "black") +
+  geom_line(color = "green") +
+  facet_nested_wrap(vars(continent, country))
+
+full_model_resids <- gapminder_clean %>% 
+  add_residuals(full_fit)
+
+set.seed(1)
+full_resids_sample <- 
+  full_model_resids %>% 
+  # nest all year-country obsevations within continents 
+  group_by(continent, country) %>% 
+  nest() %>% 
+  # randomly select all years of 2 countries from each continent
+  group_by(continent) %>% 
+  slice_sample(n = 2) %>% 
+  # expand the data
+  unnest()
+
+# plot
+ggplot(full_resids_sample, aes(x = year, y = resid)) +
+  # plot pooling model residuals
+  geom_line(data = pooling_resids_sample, color = "red") +
+  # plot continent intercept residuals
+  geom_line(data = rand_int_resids_sample, color = "blue") +
+  # plot country intercept residuals
+  geom_line(data = int_resids_sample, color = "orange") +
+  geom_line(data = rand_resids_sample, color = "black") +
+  geom_line(color = "green") +
+  facet_nested_wrap(vars(continent, country))
+```
+
+## List-columns
+
+## Creating list-columns
+
+## Specifying list-columns
